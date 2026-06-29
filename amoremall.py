@@ -8,23 +8,92 @@ load_dotenv()
 BASE_URL = "https://www.amoremall.com"
 
 
-def login(page, user_id, password):
-    page.goto(f"{BASE_URL}/member/loginForm.do")
-    page.wait_for_load_state("domcontentloaded")
+def _find_and_fill(page, selectors, value, label):
+    """여러 셀렉터를 순서대로 시도해서 첫 번째로 찾은 요소에 입력"""
+    for sel in selectors:
+        el = page.query_selector(sel)
+        if el and el.is_visible():
+            el.click()
+            el.fill(value)
+            return sel
+    raise RuntimeError(
+        f"{label} 입력 필드를 찾지 못했습니다.\n"
+        f"  시도한 셀렉터: {selectors}\n"
+        f"  현재 URL: {page.url}\n"
+        f"  → amoremall.py 의 ID_SELECTORS / PW_SELECTORS 를 실제 사이트 셀렉터로 수정하세요."
+    )
 
-    page.fill("#memId", user_id)
-    page.fill("#memPwd", password)
-    page.click('button[type="submit"], .btn-login, input[type="submit"]')
+
+# 로그인 폼 셀렉터 후보 목록 (실제 사이트에 맞게 수정 가능)
+ID_SELECTORS = [
+    "#memId", "#loginId", "#userId", "#id", "#user_id",
+    "input[name='memId']", "input[name='loginId']", "input[name='userId']",
+    "input[name='id']", "input[name='user_id']",
+    "input[type='text'][placeholder*='아이디']",
+    "input[type='email'][placeholder*='이메일']",
+]
+PW_SELECTORS = [
+    "#memPwd", "#loginPwd", "#password", "#passwd", "#pwd",
+    "input[name='memPwd']", "input[name='loginPwd']",
+    "input[name='password']", "input[name='passwd']",
+    "input[type='password']",
+]
+LOGIN_BTN_SELECTORS = [
+    "button[type='submit']", "input[type='submit']",
+    ".btn-login", ".login-btn", ".btn_login",
+    "button:has-text('로그인')", "a:has-text('로그인')",
+]
+LOGIN_URLS = [
+    f"{BASE_URL}/member/loginForm.do",
+    f"{BASE_URL}/member/login.do",
+    f"{BASE_URL}/login",
+]
+
+
+def login(page, user_id, password):
+    # 로그인 페이지 접속 (여러 URL 후보 시도)
+    for url in LOGIN_URLS:
+        page.goto(url)
+        page.wait_for_load_state("domcontentloaded")
+        # 실제 로그인 폼이 있는 페이지인지 확인
+        if page.query_selector("input[type='password']"):
+            break
+
+    # 팝업/레이어 닫기
+    for close_sel in [".btn-close", ".popup-close", ".layer-close", "button.close"]:
+        el = page.query_selector(close_sel)
+        if el and el.is_visible():
+            try:
+                el.click()
+                page.wait_for_timeout(300)
+            except Exception:
+                pass
+
+    # 아이디 입력
+    used_id_sel = _find_and_fill(page, ID_SELECTORS, user_id, "아이디")
+    print(f"  아이디 필드: {used_id_sel}")
+
+    # 비밀번호 입력
+    used_pw_sel = _find_and_fill(page, PW_SELECTORS, password, "비밀번호")
+    print(f"  비밀번호 필드: {used_pw_sel}")
+
+    # 로그인 버튼 클릭
+    for sel in LOGIN_BTN_SELECTORS:
+        btn = page.query_selector(sel)
+        if btn and btn.is_visible():
+            btn.click()
+            print(f"  로그인 버튼: {sel}")
+            break
 
     try:
         page.wait_for_navigation(wait_until="domcontentloaded", timeout=15000)
     except PlaywrightTimeoutError:
         pass
 
-    error = page.query_selector(".login-error, .error-msg")
-    if error:
+    error = page.query_selector(".login-error, .error-msg, .msg-error")
+    if error and error.is_visible():
         text = error.inner_text()
-        if any(k in text for k in ["아이디", "비밀번호", "오류"]):
+        if any(k in text for k in ["아이디", "비밀번호", "오류", "실패"]):
             raise RuntimeError(f"로그인 실패: {text.strip()}")
 
     print("✅ 로그인 성공")
@@ -206,6 +275,10 @@ def main():
             try:
                 page.screenshot(path="error-screenshot.png", full_page=True)
                 print("📸 오류 스크린샷: error-screenshot.png")
+                # 현재 페이지 HTML 저장 (셀렉터 디버깅용)
+                with open("error-page.html", "w", encoding="utf-8") as f:
+                    f.write(page.content())
+                print("🔍 페이지 HTML: error-page.html (셀렉터 확인용)")
             except Exception:
                 pass
             browser.close()
