@@ -16,7 +16,7 @@ def login(page, user_id, password):
     page.goto(BASE_URL)
     page.wait_for_load_state("networkidle")
 
-    # 우측 상단 로그인 버튼 클릭 → SSO 리다이렉트
+    # 우측 상단 로그인 버튼 → href를 직접 추출해서 이동 (뷰포트 밖 클릭 오류 방지)
     login_link = (
         page.query_selector("header a[href*='signin']")
         or page.query_selector("header a[href*='login']")
@@ -28,9 +28,18 @@ def login(page, user_id, password):
         or page.query_selector("a:has-text('로그인')")
     )
     if not login_link:
-        raise RuntimeError("메인 페이지에서 로그인 버튼을 찾을 수 없습니다. 실제 로그인 링크의 href나 텍스트를 확인해주세요.")
+        raise RuntimeError("메인 페이지에서 로그인 버튼을 찾을 수 없습니다.")
 
-    login_link.click()
+    # href 추출 후 직접 이동 (뷰포트 밖 요소 클릭 오류 우회)
+    href = login_link.get_attribute("href")
+    if href:
+        if href.startswith("http"):
+            page.goto(href)
+        else:
+            page.goto(f"{BASE_URL}{href}")
+    else:
+        # href가 없으면 JS로 강제 클릭
+        page.evaluate("el => el.click()", login_link)
 
     # SSO 페이지 로드 대기
     page.wait_for_url(f"**{SSO_LOGIN_DOMAIN}**", timeout=20000)
