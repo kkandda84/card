@@ -12,20 +12,39 @@ SSO_LOGIN_DOMAIN = "one3-ap.amorepacific.com"
 
 
 def login(page, user_id, password):
-    # 아모레몰 메인 → 로그인 버튼 클릭 → SSO 페이지로 자동 리다이렉트
-    page.goto(f"{BASE_URL}/kr/ko/auth/signin")
+    # 메인 페이지 접속 후 로그인 링크 클릭 → SSO로 리다이렉트
+    page.goto(BASE_URL)
     page.wait_for_load_state("domcontentloaded")
 
-    # SSO 페이지로 리다이렉트될 때까지 대기
-    page.wait_for_url(f"**{SSO_LOGIN_DOMAIN}**", timeout=15000)
+    # 로그인 링크 클릭 (SSO 리다이렉트 파라미터를 자동으로 포함시키기 위해)
+    login_link = (
+        page.query_selector("a[href*='signin'], a[href*='login']")
+        or page.query_selector("a:has-text('로그인')")
+    )
+    if not login_link:
+        raise RuntimeError("메인 페이지에서 로그인 링크를 찾을 수 없습니다.")
+
+    with page.expect_navigation(timeout=15000):
+        login_link.click()
+
     page.wait_for_load_state("domcontentloaded")
+
+    # SSO 페이지가 아닌 경우 한 번 더 리다이렉트 대기
+    if SSO_LOGIN_DOMAIN not in page.url:
+        page.wait_for_url(f"**{SSO_LOGIN_DOMAIN}**", timeout=15000)
+        page.wait_for_load_state("domcontentloaded")
+
+    print(f"  SSO 로그인 페이지 접속: {page.url[:60]}...")
 
     # 아이디 입력
+    page.wait_for_selector("#loginid", timeout=10000)
     page.fill("#loginid", user_id)
 
-    # 비밀번호 입력 (#password-span 은 span 컨테이너이므로 내부 input 도 시도)
-    pw_input = page.query_selector("#password-span input[type='password']") \
-             or page.query_selector("#password-span")
+    # 비밀번호 입력 (#password-span 내부 input 우선, 없으면 span 자체)
+    pw_input = (
+        page.query_selector("#password-span input[type='password']")
+        or page.query_selector("#password-span")
+    )
     if not pw_input:
         raise RuntimeError("비밀번호 입력 필드(#password-span)를 찾을 수 없습니다.")
     pw_input.click()
@@ -35,10 +54,10 @@ def login(page, user_id, password):
     page.click("#dologin")
 
     # 아모레몰로 복귀 대기
-    page.wait_for_url(f"**{BASE_URL}**", timeout=20000)
+    page.wait_for_url(f"**amoremall.com**", timeout=20000)
     page.wait_for_load_state("domcontentloaded")
 
-    # 로그인 실패 체크 (SSO 페이지에 그대로 남아있으면 실패)
+    # 로그인 실패 체크
     if SSO_LOGIN_DOMAIN in page.url:
         error = page.query_selector(".error, .alert, [class*='error']")
         msg = error.inner_text() if error else "아이디 또는 비밀번호를 확인하세요."
