@@ -10,6 +10,41 @@ BASE_URL = "https://www.amoremall.com"
 
 SSO_LOGIN_DOMAIN = "one3-ap.amorepacific.com"
 
+POPUP_CLOSE_SELECTORS = [
+    # 닫기 버튼 일반
+    "button.btn-close", "a.btn-close", ".btn_close",
+    "button.close", "a.close",
+    # 팝업/레이어 내부 닫기
+    ".layer-popup button.close", ".layer-popup .btn-close",
+    ".modal button.close", ".modal .btn-close",
+    "[class*='popup'] button[class*='close']",
+    "[class*='layer'] button[class*='close']",
+    # 팝업 외부 딤 클릭
+    ".dimmed", ".dim", ".overlay",
+]
+
+
+def close_popup(page):
+    """로그인 후 레이어 팝업을 닫는다. 팝업이 없으면 조용히 넘어간다."""
+    page.wait_for_timeout(1500)  # 팝업 렌더링 대기
+
+    for sel in POPUP_CLOSE_SELECTORS:
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                page.evaluate("el => el.click()", el)
+                page.wait_for_timeout(800)
+                print(f"  팝업 닫기: {sel}")
+                # 팝업이 여러 개일 수 있으므로 한 번 더 확인
+                for sel2 in POPUP_CLOSE_SELECTORS:
+                    el2 = page.query_selector(sel2)
+                    if el2 and el2.is_visible():
+                        page.evaluate("el => el.click()", el2)
+                        page.wait_for_timeout(500)
+                return
+        except Exception:
+            continue
+
 
 def login(page, user_id, password):
     # 메인 페이지 접속
@@ -75,6 +110,7 @@ def login(page, user_id, password):
         raise RuntimeError(f"로그인 실패: {msg.strip()}")
 
     print("✅ 로그인 성공")
+    close_popup(page)
 
 
 def add_to_cart(page, product_number):
