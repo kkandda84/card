@@ -8,93 +8,41 @@ load_dotenv()
 BASE_URL = "https://www.amoremall.com"
 
 
-def _find_and_fill(page, selectors, value, label):
-    """여러 셀렉터를 순서대로 시도해서 첫 번째로 찾은 요소에 입력"""
-    for sel in selectors:
-        el = page.query_selector(sel)
-        if el and el.is_visible():
-            el.click()
-            el.fill(value)
-            return sel
-    raise RuntimeError(
-        f"{label} 입력 필드를 찾지 못했습니다.\n"
-        f"  시도한 셀렉터: {selectors}\n"
-        f"  현재 URL: {page.url}\n"
-        f"  → amoremall.py 의 ID_SELECTORS / PW_SELECTORS 를 실제 사이트 셀렉터로 수정하세요."
-    )
-
-
-# 로그인 폼 셀렉터 후보 목록 (실제 사이트에 맞게 수정 가능)
-ID_SELECTORS = [
-    "#memId", "#loginId", "#userId", "#id", "#user_id",
-    "input[name='memId']", "input[name='loginId']", "input[name='userId']",
-    "input[name='id']", "input[name='user_id']",
-    "input[type='text'][placeholder*='아이디']",
-    "input[type='email'][placeholder*='이메일']",
-]
-PW_SELECTORS = [
-    "#memPwd", "#loginPwd", "#password", "#passwd", "#pwd",
-    "input[name='memPwd']", "input[name='loginPwd']",
-    "input[name='password']", "input[name='passwd']",
-    "input[type='password']",
-]
-LOGIN_BTN_SELECTORS = [
-    "button[type='submit']", "input[type='submit']",
-    ".btn-login", ".login-btn", ".btn_login",
-    "button:has-text('로그인')", "a:has-text('로그인')",
-]
-LOGIN_URLS = [
-    f"{BASE_URL}/member/loginForm.do",
-    f"{BASE_URL}/member/login.do",
-    f"{BASE_URL}/login",
-]
+SSO_LOGIN_DOMAIN = "one3-ap.amorepacific.com"
 
 
 def login(page, user_id, password):
-    # 로그인 페이지 접속 (여러 URL 후보 시도)
-    for url in LOGIN_URLS:
-        page.goto(url)
-        page.wait_for_load_state("domcontentloaded")
-        # 실제 로그인 폼이 있는 페이지인지 확인
-        if page.query_selector("input[type='password']"):
-            break
+    # 아모레몰 메인 → 로그인 버튼 클릭 → SSO 페이지로 자동 리다이렉트
+    page.goto(f"{BASE_URL}/kr/ko/auth/signin")
+    page.wait_for_load_state("domcontentloaded")
 
-    # 팝업/레이어 닫기
-    for close_sel in [".btn-close", ".popup-close", ".layer-close", "button.close"]:
-        el = page.query_selector(close_sel)
-        if el and el.is_visible():
-            try:
-                el.click()
-                page.wait_for_timeout(300)
-            except Exception:
-                pass
+    # SSO 페이지로 리다이렉트될 때까지 대기
+    page.wait_for_url(f"**{SSO_LOGIN_DOMAIN}**", timeout=15000)
+    page.wait_for_load_state("domcontentloaded")
 
     # 아이디 입력
-    used_id_sel = _find_and_fill(page, ID_SELECTORS, user_id, "아이디")
-    print(f"  아이디 필드: {used_id_sel}")
+    page.fill("#loginid", user_id)
 
-    # 비밀번호 입력
-    used_pw_sel = _find_and_fill(page, PW_SELECTORS, password, "비밀번호")
-    print(f"  비밀번호 필드: {used_pw_sel}")
+    # 비밀번호 입력 (#password-span 은 span 컨테이너이므로 내부 input 도 시도)
+    pw_input = page.query_selector("#password-span input[type='password']") \
+             or page.query_selector("#password-span")
+    if not pw_input:
+        raise RuntimeError("비밀번호 입력 필드(#password-span)를 찾을 수 없습니다.")
+    pw_input.click()
+    pw_input.fill(password)
 
     # 로그인 버튼 클릭
-    for sel in LOGIN_BTN_SELECTORS:
-        btn = page.query_selector(sel)
-        if btn and btn.is_visible():
-            btn.click()
-            print(f"  로그인 버튼: {sel}")
-            break
+    page.click("#dologin")
 
-    try:
-        page.wait_for_navigation(wait_until="domcontentloaded", timeout=15000)
-    except PlaywrightTimeoutError:
-        pass
+    # 아모레몰로 복귀 대기
+    page.wait_for_url(f"**{BASE_URL}**", timeout=20000)
+    page.wait_for_load_state("domcontentloaded")
 
-    error = page.query_selector(".login-error, .error-msg, .msg-error")
-    if error and error.is_visible():
-        text = error.inner_text()
-        if any(k in text for k in ["아이디", "비밀번호", "오류", "실패"]):
-            raise RuntimeError(f"로그인 실패: {text.strip()}")
+    # 로그인 실패 체크 (SSO 페이지에 그대로 남아있으면 실패)
+    if SSO_LOGIN_DOMAIN in page.url:
+        error = page.query_selector(".error, .alert, [class*='error']")
+        msg = error.inner_text() if error else "아이디 또는 비밀번호를 확인하세요."
+        raise RuntimeError(f"로그인 실패: {msg.strip()}")
 
     print("✅ 로그인 성공")
 
