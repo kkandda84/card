@@ -12,27 +12,13 @@ SSO_LOGIN_DOMAIN = "one3-ap.amorepacific.com"
 
 
 def login(page, user_id, password):
-    # 메인 페이지 접속 후 로그인 링크 클릭 → SSO로 리다이렉트
-    page.goto(BASE_URL)
+    # 로그인이 필요한 마이페이지로 이동 → SSO 자동 리다이렉트
+    page.goto(f"{BASE_URL}/kr/ko/my/page")
     page.wait_for_load_state("domcontentloaded")
 
-    # 로그인 링크 클릭 (SSO 리다이렉트 파라미터를 자동으로 포함시키기 위해)
-    login_link = (
-        page.query_selector("a[href*='signin'], a[href*='login']")
-        or page.query_selector("a:has-text('로그인')")
-    )
-    if not login_link:
-        raise RuntimeError("메인 페이지에서 로그인 링크를 찾을 수 없습니다.")
-
-    with page.expect_navigation(timeout=15000):
-        login_link.click()
-
+    # SSO 리다이렉트 대기
+    page.wait_for_url(f"**{SSO_LOGIN_DOMAIN}**", timeout=20000)
     page.wait_for_load_state("domcontentloaded")
-
-    # SSO 페이지가 아닌 경우 한 번 더 리다이렉트 대기
-    if SSO_LOGIN_DOMAIN not in page.url:
-        page.wait_for_url(f"**{SSO_LOGIN_DOMAIN}**", timeout=15000)
-        page.wait_for_load_state("domcontentloaded")
 
     print(f"  SSO 로그인 페이지 접속: {page.url[:60]}...")
 
